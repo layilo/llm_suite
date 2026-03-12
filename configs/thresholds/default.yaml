@@ -1,0 +1,6 @@
+p95_latency_regression_pct: 10.0
+ttft_regression_pct: 12.0
+throughput_regression_pct: 10.0
+accuracy_min: 0.65
+cost_per_million_tokens_regression_pct: 15.0
+error_rate_max: 0.05

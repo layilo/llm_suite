@@ -1,0 +1,2 @@
+{"id":"gold-1","prompt":"Answer with a single word: What gas do plants absorb from the atmosphere?","reference":"carbon dioxide","task_type":"qa","expected_contains":["carbon"],"golden":true}
+{"id":"gold-2","prompt":"Answer with a single word: 2 + 2 = ?","reference":"4","task_type":"qa","expected_contains":["4"],"golden":true}

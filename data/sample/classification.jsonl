@@ -1,0 +1,2 @@
+{"id":"cls-1","prompt":"Classify the sentiment of this review as positive, negative, or neutral: 'The battery lasts all day and charges quickly.'","reference":"positive","task_type":"classification","tags":["sentiment"]}
+{"id":"cls-2","prompt":"Classify the sentiment of this review as positive, negative, or neutral: 'The app crashes every time I upload a file.'","reference":"negative","task_type":"classification","tags":["sentiment"]}

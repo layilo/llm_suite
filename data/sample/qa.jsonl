@@ -1,0 +1,2 @@
+{"id":"qa-1","prompt":"Question: What planet is known as the Red Planet? Answer briefly.","reference":"Mars","task_type":"qa","tags":["science"]}
+{"id":"qa-2","prompt":"Question: Who wrote Pride and Prejudice?","reference":"Jane Austen","task_type":"qa","tags":["literature"]}

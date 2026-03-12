@@ -1,0 +1,41 @@
+profile_name: local-demo
+mock_mode: true
+continue_on_error: true
+random_seed: 7
+output_dir: artifacts/generated/local-demo
+report_formats: [json, csv, markdown, html]
+selected_backends: [vllm, tensorrt_llm, onnx_runtime]
+datasets:
+  - name: summarization
+    path: data/sample/summarization.jsonl
+    task_type: summarization
+  - name: qa
+    path: data/sample/qa.jsonl
+    task_type: qa
+  - name: classification
+    path: data/sample/classification.jsonl
+    task_type: classification
+backend_defaults:
+  model_name: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+  precision: fp16
+  concurrency: 2
+  batch_size: 1
+  max_output_tokens: 64
+cost_profile: configs/costs/default.yaml
+thresholds_profile: configs/thresholds/default.yaml
+composite_weights:
+  quality: 0.35
+  latency: 0.20
+  throughput: 0.20
+  cost: 0.15
+  reliability: 0.10
+backend_overrides:
+  vllm:
+    mode: mock
+    endpoint: http://localhost:8000/v1/chat/completions
+  tensorrt_llm:
+    mode: mock
+    command: python scripts/mock_tensorrt_runner.py
+  onnx_runtime:
+    mode: mock
+    execution_provider: CPUExecutionProvider

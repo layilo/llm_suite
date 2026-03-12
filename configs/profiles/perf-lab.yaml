@@ -1,0 +1,22 @@
+profile_name: perf-lab
+mock_mode: false
+continue_on_error: true
+random_seed: 21
+output_dir: artifacts/generated/perf-lab
+report_formats: [json, csv, markdown, html]
+selected_backends: [vllm, tensorrt_llm, onnx_runtime]
+datasets:
+  - name: summarization
+    path: data/sample/summarization.jsonl
+    task_type: summarization
+  - name: qa
+    path: data/sample/qa.jsonl
+    task_type: qa
+backend_defaults:
+  model_name: meta-llama/Llama-3.1-70B-Instruct
+  precision: fp8
+  concurrency: 16
+  batch_size: 8
+  max_output_tokens: 256
+cost_profile: configs/costs/default.yaml
+thresholds_profile: configs/thresholds/default.yaml

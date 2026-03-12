@@ -1,0 +1,19 @@
+{
+  "name": "llm-benchmark-suite",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": ".."
+  },
+  "postCreateCommand": "pip install -e .[dev]",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python"
+      },
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff"
+      ]
+    }
+  }
+}

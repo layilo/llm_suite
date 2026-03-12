@@ -1,0 +1,3 @@
+backend_type: onnx_runtime
+benchmark_script: scripts/run_onnx_benchmark.py
+execution_provider: CPUExecutionProvider

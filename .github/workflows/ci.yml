@@ -1,0 +1,29 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+      - name: Lint
+        run: python -m ruff check src tests
+      - name: Test
+        run: python -m pytest --cov=src/llm_benchmark_suite --cov-report=term-missing
+      - name: Smoke benchmark
+        run: python -m llm_benchmark_suite.cli demo --output-dir artifacts/generated/ci-demo
+      - name: Upload smoke artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-artifacts
+          path: artifacts/generated/ci-demo

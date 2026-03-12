@@ -1,0 +1,19 @@
+profile_name: ci-smoke
+mock_mode: true
+continue_on_error: false
+random_seed: 11
+output_dir: artifacts/generated/ci-smoke
+report_formats: [json, markdown]
+selected_backends: [vllm, onnx_runtime]
+datasets:
+  - name: golden-regression
+    path: data/golden/golden_regression.jsonl
+    task_type: qa
+backend_defaults:
+  model_name: smoke-model
+  precision: int8
+  concurrency: 1
+  batch_size: 1
+  max_output_tokens: 32
+cost_profile: configs/costs/default.yaml
+thresholds_profile: configs/thresholds/default.yaml

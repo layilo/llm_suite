@@ -1,0 +1,7 @@
+gpu_hourly_cost_usd: 2.75
+cpu_hourly_cost_usd: 0.35
+memory_gb_hourly_cost_usd: 0.02
+storage_gb_monthly_cost_usd: 0.08
+network_gb_cost_usd: 0.01
+amortization_factor: 0.85
+successful_response_discount: 1.0

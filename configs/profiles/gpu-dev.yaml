@@ -1,0 +1,30 @@
+profile_name: gpu-dev
+mock_mode: false
+continue_on_error: true
+random_seed: 13
+output_dir: artifacts/generated/gpu-dev
+report_formats: [json, csv, markdown, html]
+selected_backends: [vllm, tensorrt_llm, onnx_runtime]
+datasets:
+  - name: summarization
+    path: data/sample/summarization.jsonl
+    task_type: summarization
+backend_defaults:
+  model_name: meta-llama/Llama-3.1-8B-Instruct
+  precision: fp16
+  concurrency: 4
+  batch_size: 2
+  max_output_tokens: 128
+cost_profile: configs/costs/default.yaml
+thresholds_profile: configs/thresholds/default.yaml
+backend_overrides:
+  vllm:
+    mode: real
+    endpoint: http://localhost:8000/v1/chat/completions
+  tensorrt_llm:
+    mode: real
+    command: trtllm-bench --model_dir /models/llama-8b
+  onnx_runtime:
+    mode: real
+    benchmark_script: scripts/run_onnx_benchmark.py
+    execution_provider: CUDAExecutionProvider

@@ -1,0 +1,101 @@
+{
+  "run_id": "sample-run-001",
+  "profile_name": "local-demo",
+  "timestamp": "2026-03-12T00:00:00Z",
+  "mode": "mock",
+  "git_commit": null,
+  "environment": {
+    "python_version": "3.11.8",
+    "platform": "sample",
+    "processor": "sample-gpu",
+    "timestamp_utc": "2026-03-12T00:00:00Z"
+  },
+  "backends": ["vllm", "tensorrt_llm", "onnx_runtime"],
+  "datasets": ["summarization"],
+  "backend_metrics": [
+    {
+      "backend_name": "vllm",
+      "model_name": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+      "dataset_name": "summarization",
+      "run_timestamp": "2026-03-12T00:00:00Z",
+      "request_count": 2,
+      "prompt_tokens": 41,
+      "completion_tokens": 24,
+      "total_tokens": 65,
+      "ttft_ms_avg": 35.2,
+      "tpot_ms_avg": 4.8,
+      "latency_ms_avg": 86.5,
+      "latency_ms_p50": 85.0,
+      "latency_ms_p95": 91.0,
+      "latency_ms_p99": 92.0,
+      "tokens_per_second": 375.7,
+      "requests_per_second": 11.6,
+      "success_rate": 1.0,
+      "error_rate": 0.0,
+      "gpu_memory_gb": 8.0,
+      "peak_host_memory_gb": 2.5,
+      "gpu_utilization_pct": 71.0,
+      "warmup_time_s": 1.4,
+      "model_load_time_s": 4.1,
+      "concurrency": 2,
+      "batch_size": 1,
+      "hardware_metadata": {"device": "mock-gpu", "mode": "mock"},
+      "precision": "fp16",
+      "backend_version": "mock-0.1",
+      "quantization": "none",
+      "diagnostics": {}
+    }
+  ],
+  "accuracy_metrics": [
+    {
+      "backend_name": "vllm",
+      "dataset_name": "summarization",
+      "exact_match": 0.5,
+      "token_f1": 0.82,
+      "bleu": 0.79,
+      "rouge_l": 0.81,
+      "semantic_similarity": null,
+      "rubric_score": null,
+      "pass_rate": 1.0,
+      "golden_pass_rate": 0.0
+    }
+  ],
+  "cost_metrics": [
+    {
+      "backend_name": "vllm",
+      "dataset_name": "summarization",
+      "cost_per_1k_prompts_usd": 0.14,
+      "cost_per_million_tokens_usd": 4.22,
+      "cost_per_request_usd": 0.00014,
+      "cost_per_successful_response_usd": 0.00014,
+      "cost_per_throughput_unit_usd": 0.000001,
+      "cost_adjusted_quality_score": 2785.7,
+      "estimated_total_run_cost_usd": 0.00028
+    }
+  ],
+  "regression_results": [
+    {
+      "check_name": "p95_latency",
+      "passed": true,
+      "threshold": 10.0,
+      "current_value": 91.0,
+      "baseline_value": 90.0,
+      "delta_pct": 1.11,
+      "message": "p95_latency delta=1.11% threshold=10.00%"
+    }
+  ],
+  "rankings": [
+    {
+      "backend": "vllm",
+      "dataset": "summarization",
+      "composite_score": 0.8123,
+      "quality": 0.784,
+      "latency_score": 0.35,
+      "throughput_score": 0.88,
+      "cost_score": 0.91,
+      "reliability_score": 1.0
+    }
+  ],
+  "raw_responses": [],
+  "metadata": {}
+}

@@ -1,0 +1,3 @@
+backend_type: tensorrt_llm
+command: trtllm-bench --model_dir /models/llama
+log_parse_hint: json
