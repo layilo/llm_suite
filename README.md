@@ -1,183 +1,444 @@
 # LLM Evaluation & Benchmarking Suite
 
-Reusable benchmarking and evaluation framework for comparing `vLLM`, `TensorRT-LLM`, and `ONNX Runtime / ORT GenAI` across answer quality, latency, throughput, resource utilization, and estimated serving cost.
+A reusable benchmarking harness for comparing `vLLM`, `TensorRT-LLM`, and `ONNX Runtime / ORT GenAI` across output quality, latency, throughput, reliability, and estimated serving cost.
 
-The repository is designed to be useful in two modes:
+This repository is designed to work in two practical modes:
 
-- `mock/demo mode`: runs locally without requiring GPU infrastructure or real inference servers
-- `real mode`: plugs into environment-specific serving endpoints, commands, or benchmark scripts
+- `mock mode`: runs locally without GPUs or live inference servers
+- `real mode`: uses environment-specific endpoints, commands, or scripts for actual backend execution
 
-This makes the suite usable by ML engineers validating model behavior, platform engineers wiring serving infrastructure, and performance engineers tracking regressions over time.
+The suite is organized so the same core workflow is used in both modes. Only the adapter implementation changes.
 
-## Why This Exists
+## Table Of Contents
 
-Backend decisions are trade-off decisions. The fastest serving stack can produce worse outputs. The cheapest stack can increase latency tails. A quantization or scheduler change can improve throughput while hurting TTFT or reliability. This project gives teams a common harness to answer those questions consistently and to catch regressions automatically.
+- [What This Repository Is For](#what-this-repository-is-for)
+- [How The Pieces Fit Together](#how-the-pieces-fit-together)
+- [Execution Flow, End To End](#execution-flow-end-to-end)
+- [Repository Map](#repository-map)
+- [How Each Module Works](#how-each-module-works)
+- [How Each Script Works](#how-each-script-works)
+- [Profiles, Datasets, And Thresholds](#profiles-datasets-and-thresholds)
+- [Step-By-Step Getting Started](#step-by-step-getting-started)
+- [CLI Commands](#cli-commands)
+- [Artifacts And Outputs](#artifacts-and-outputs)
+- [How Mock Mode Works](#how-mock-mode-works)
+- [How Real Mode Works](#how-real-mode-works)
+- [Backend-Specific Notes](#backend-specific-notes)
+- [Regression Comparison](#regression-comparison)
+- [Testing And Validation](#testing-and-validation)
+- [Docker Workflow](#docker-workflow)
+- [Troubleshooting](#troubleshooting)
+- [Current Limitations](#current-limitations)
 
-## What The Suite Does
+## What This Repository Is For
 
-- runs the same prompt corpora against multiple serving backends
-- normalizes serving metrics into a common schema
-- evaluates output quality against references and golden expectations
-- estimates serving cost from configurable infrastructure assumptions
-- compares current runs against prior baselines
-- generates JSON, CSV, Markdown, and HTML artifacts
-- produces a ranking based on a configurable composite score
+Choosing an inference backend is a trade-off problem.
 
-## Supported Backends
+A backend can be faster but less accurate. A configuration can reduce cost while hurting TTFT. A quantized deployment can improve throughput but increase failures or quality drift. This suite gives you one repeatable path to answer those questions and to turn them into baseline and regression checks.
 
-- `vLLM`
-- `TensorRT-LLM`
-- `ONNX Runtime / ORT GenAI`
+It is useful for:
 
-## Core Capabilities
+- ML engineers validating answer quality across serving stacks
+- platform engineers integrating internal inference systems into a common harness
+- performance engineers tracking latency and throughput regressions over time
+- CI pipelines that need a deterministic benchmark smoke path
 
-- unified adapter abstraction with a shared backend contract
-- deterministic mock responses for local development and CI smoke tests
-- real-backend scaffolding for HTTP, CLI, and script-based integrations
-- evaluation metrics including exact match, token F1, BLEU, ROUGE-L, pass rate, and golden checks
-- cost modeling for cost per request, cost per million tokens, and cost-adjusted quality
-- regression rules for latency, TTFT, throughput, cost growth, accuracy floor, and error rate
-- profile-driven reproducibility with YAML configs
-- report generation for both humans and CI/CD systems
+## How The Pieces Fit Together
 
-## Architecture Diagram
+At a high level, the repository is a pipeline:
+
+1. A CLI command starts the run.
+2. A YAML profile is loaded.
+3. Datasets are read from `jsonl` files.
+4. Adapters are created for each selected backend.
+5. Each adapter produces normalized `BenchmarkResponse` objects.
+6. The runner aggregates serving metrics.
+7. The evaluator computes quality metrics.
+8. The cost model estimates serving cost.
+9. Rankings are computed.
+10. Optional regression checks compare the run against a baseline.
+11. Reports are written to disk.
+
+## Execution Flow, End To End
 
 ```mermaid
 flowchart TD
-    A[CLI Commands\nrun / demo / evaluate / compare / regress / report] --> B[Config Loader]
-    B --> C[Benchmark Orchestrator]
-    C --> D[Dataset Loader]
-    C --> E[Adapter Factory]
-    E --> F[vLLM Adapter]
-    E --> G[TensorRT-LLM Adapter]
-    E --> H[ONNX Runtime Adapter]
-    F --> I[Normalized Responses]
+    A[CLI command] --> B[config.py load_run_config]
+    B --> C[runner.py run_benchmark]
+    C --> D[utils/io.py load_jsonl_dataset]
+    C --> E[adapters/factory.py create_adapter]
+    E --> F[vllm.py]
+    E --> G[tensorrt_llm.py]
+    E --> H[onnx_runtime.py]
+    F --> I[BenchmarkResponse list]
     G --> I
     H --> I
-    I --> J[Metrics Aggregation]
-    I --> K[Quality Evaluator]
-    J --> L[Cost Model]
-    K --> M[Composite Scoring]
+    I --> J[Base adapter benchmark aggregation]
+    J --> K[evaluators/quality.py]
+    J --> L[cost/model.py]
+    K --> M[summary.rankings]
     L --> M
-    M --> N[Regression Checks]
-    N --> O[Reports: JSON / CSV / Markdown / HTML]
+    M --> N[regressions/checks.py optional compare]
+    N --> O[reports/generator.py]
+    O --> P[summary.json / csv / md / html / raw_responses.json]
 ```
 
-## Benchmark Workflow
-
-1. Load a run profile from `configs/profiles/*.yaml`.
-2. Load one or more datasets from `jsonl`.
-3. Instantiate each requested backend adapter.
-4. Start or validate backend availability.
-5. Execute requests and collect normalized per-request outputs.
-6. Aggregate latency, throughput, token, and utilization metrics.
-7. Run answer-quality evaluation against references.
-8. Compute cost metrics from the configured cost profile.
-9. Optionally compare results against a saved baseline.
-10. Generate machine-readable and human-readable reports.
-
-## Repository Structure
+## Repository Map
 
 ```text
 llm_suite/
-|-- .devcontainer/
-|-- .github/workflows/
-|-- artifacts/
-|   `-- sample_run/
+|-- .github/workflows/          CI workflow definitions
+|-- artifacts/                  Generated example and benchmark outputs
 |-- configs/
-|   |-- backends/
-|   |-- costs/
-|   |-- profiles/
-|   `-- thresholds/
+|   |-- costs/                  Cost model assumptions
+|   |-- profiles/               Benchmark run profiles
+|   `-- thresholds/             Regression gate thresholds
 |-- data/
-|   |-- golden/
-|   `-- sample/
-|-- docker/
-|-- reports/
-|-- scripts/
-|-- src/llm_benchmark_suite/
-|   |-- adapters/
-|   |-- cost/
-|   |-- evaluators/
-|   |-- metrics/
-|   |-- orchestration/
-|   |-- regressions/
-|   |-- reports/
-|   |-- schemas/
-|   `-- utils/
-|-- tests/
+|   |-- golden/                 Golden/regression-oriented datasets
+|   `-- sample/                 Small built-in demo datasets
+|-- docker/                     Compose file for containerized demo runs
+|-- scripts/                    Helper scripts used by adapters or demos
+|-- src/llm_benchmark_suite/    Main application code
+|-- tests/                      Pytest coverage
 |-- Dockerfile
 |-- Makefile
 |-- pyproject.toml
 `-- README.md
 ```
 
-## Repository Walkthrough
+## How Each Module Works
 
-### `src/llm_benchmark_suite/`
+### `src/llm_benchmark_suite/cli.py`
 
-Primary application code.
+This is the main entry point.
 
-- `cli.py`: top-level command-line interface
-- `config.py`: YAML config loading and normalization
-- `logging_utils.py`: structured and console logging setup
-- `schemas/models.py`: Pydantic models for requests, responses, metrics, and summaries
-- `adapters/`: backend-specific integration logic
-- `orchestration/runner.py`: end-to-end benchmark execution
-- `evaluators/quality.py`: output-quality evaluation
-- `metrics/text.py`: lightweight scoring metrics
-- `cost/model.py`: cost estimation
-- `regressions/checks.py`: baseline comparison rules
-- `reports/generator.py`: JSON, CSV, Markdown, and HTML report writers
+It provides the commands:
 
-### `configs/`
+- `run`: execute a benchmark using a YAML profile
+- `demo`: force mock mode and write to a chosen output directory
+- `evaluate`: print quality metrics from an existing `summary.json`
+- `report`: regenerate a specific report format from an existing summary
+- `compare`: print regression comparison results
+- `regress`: run regression gates and exit with code `1` if any fail
+- `export-baseline`: copy a summary into a reusable baseline artifact
 
-Reproducible run definitions and policy settings.
+`cli.py` does very little business logic itself. Its job is to load config, call the orchestrator, and print results.
 
-- `profiles/local-demo.yaml`: default mock profile
-- `profiles/ci-smoke.yaml`: smaller CI profile
-- `profiles/gpu-dev.yaml`: example real-backend development profile
-- `profiles/perf-lab.yaml`: larger performance profile
-- `costs/default.yaml`: cost assumptions
-- `thresholds/default.yaml`: regression gates
+### `src/llm_benchmark_suite/config.py`
 
-### `data/`
+This module loads YAML profiles and turns them into a typed `RunConfig` model.
 
-Small built-in datasets so the repository is runnable immediately.
+Responsibilities:
 
-- `data/sample/summarization.jsonl`
-- `data/sample/qa.jsonl`
-- `data/sample/classification.jsonl`
-- `data/golden/golden_regression.jsonl`
+- reads profile YAML
+- applies environment variable overrides for output directory and profile name
+- validates the structure using Pydantic models
 
-### `tests/`
+This is the boundary between repo configuration and runtime execution.
 
-Pytest coverage for:
+### `src/llm_benchmark_suite/orchestration/runner.py`
 
-- adapter contract behavior
-- metrics correctness
-- cost calculations
-- regression checks
-- report generation
-- config loading
-- CLI smoke path
-- end-to-end mock benchmark flow
+This is the core pipeline coordinator.
 
-## Prerequisites
+For each dataset and each selected backend it:
 
-Required:
+1. loads dataset requests
+2. builds the adapter from the registry
+3. starts the backend if needed
+4. runs the benchmark via the adapter
+5. evaluates quality
+6. computes cost metrics
+7. appends results into a `BenchmarkSummary`
+8. computes rankings across the collected metrics
+9. optionally compares the run with a baseline
+10. writes reports and raw responses to disk
 
-- Python `3.9+`
-- `pip`
+If `continue_on_error` is true, backend failures are recorded in `summary.metadata["errors"]` and the run continues.
 
-Optional for real mode:
+### `src/llm_benchmark_suite/adapters/base.py`
 
-- NVIDIA GPU and drivers
-- reachable `vLLM` endpoint
-- `TensorRT-LLM` benchmark tooling
-- `ONNX Runtime` runtime assets or scripts
+This defines the common backend contract.
 
-## Installation
+Important methods:
+
+- `start_server()`: optional startup hook
+- `stop_server()`: optional teardown hook
+- `health_check()`: backend availability check
+- `infer()`: one request in, one normalized response out
+- `benchmark()`: runs `infer()` across a dataset and aggregates serving metrics
+
+This is the reason the rest of the suite can stay backend-agnostic.
+
+### `src/llm_benchmark_suite/adapters/factory.py`
+
+This is the backend registry.
+
+It maps backend names such as `vllm`, `tensorrt_llm`, and `onnx_runtime` to their adapter classes. Adding a new backend means implementing an adapter and registering it here.
+
+### `src/llm_benchmark_suite/adapters/vllm.py`
+
+The `vLLM` adapter supports:
+
+- `mock` mode via deterministic fake responses
+- `real` mode via an OpenAI-compatible HTTP endpoint
+
+In real mode it:
+
+- performs a health check against `health_endpoint` or `endpoint`
+- sends a chat-completions style request
+- extracts text and token usage from the JSON response
+
+### `src/llm_benchmark_suite/adapters/tensorrt_llm.py`
+
+The `TensorRT-LLM` adapter supports:
+
+- `mock` mode via deterministic fake responses with slightly different latency characteristics
+- `real` mode via a configured shell command
+
+In real mode it expects the configured command to print JSON to stdout. The adapter reads that JSON and normalizes latency fields into a `BenchmarkResponse`.
+
+### `src/llm_benchmark_suite/adapters/onnx_runtime.py`
+
+The `ONNX Runtime` adapter supports:
+
+- `mock` mode via deterministic fake responses with slightly adjusted timings
+- `real` mode via a Python benchmark script
+
+In real mode it executes the configured script and expects the script to print JSON to stdout.
+
+### `src/llm_benchmark_suite/evaluators/quality.py`
+
+This module compares model output against the dataset reference answers.
+
+Metrics computed today:
+
+- exact match
+- token F1
+- BLEU
+- ROUGE-L
+- pass rate
+- golden pass rate
+
+The output is stored as `AccuracyMetrics` for each backend and dataset pair.
+
+### `src/llm_benchmark_suite/metrics/text.py`
+
+This contains the lightweight text scoring functions used by the evaluator.
+
+They are intentionally simple and dependency-light so the repository remains easy to run locally and in CI.
+
+### `src/llm_benchmark_suite/cost/model.py`
+
+This converts backend metrics into cost metrics using the selected cost profile.
+
+Examples:
+
+- cost per request
+- cost per successful response
+- cost per million tokens
+- cost-adjusted quality score
+
+### `src/llm_benchmark_suite/regressions/checks.py`
+
+This compares the current run to a baseline and evaluates regression gates.
+
+Current comparisons include:
+
+- p95 latency
+- TTFT
+- throughput
+- cost per million tokens
+- error rate max threshold
+- accuracy minimum threshold
+- missing backend/dataset pair detection
+
+The comparison now runs per `(backend_name, dataset_name)` pair rather than only the first item in each summary.
+
+### `src/llm_benchmark_suite/reports/generator.py`
+
+This writes the final output artifacts.
+
+Supported report formats:
+
+- `json`
+- `csv`
+- `markdown`
+- `html`
+
+The generator consumes a `BenchmarkSummary` and emits human-readable and machine-readable outputs.
+
+### `src/llm_benchmark_suite/schemas/models.py`
+
+This defines the main data contracts used across the project.
+
+Important models:
+
+- `BenchmarkRequest`
+- `BenchmarkResponse`
+- `BackendMetrics`
+- `AccuracyMetrics`
+- `CostMetrics`
+- `RegressionCheckResult`
+- `BenchmarkSummary`
+
+### `src/llm_benchmark_suite/utils/io.py`
+
+This contains the file and dataset helpers.
+
+It is responsible for:
+
+- ensuring output directories exist
+- loading `jsonl` datasets into `BenchmarkRequest` objects
+- writing JSON artifacts
+- writing CSV artifacts
+
+### `src/llm_benchmark_suite/utils/system.py`
+
+This records run metadata for traceability.
+
+It collects:
+
+- Python version
+- platform string
+- processor name
+- UTC timestamp
+- current git commit, when available
+
+### `src/llm_benchmark_suite/logging_utils.py`
+
+This sets the root logger format and level.
+
+Environment variables supported here:
+
+- `LLM_BENCHMARK_LOG_LEVEL`
+- `LLM_BENCHMARK_JSON_LOGS`
+
+## How Each Script Works
+
+### `scripts/run_onnx_benchmark.py`
+
+Current role: scaffold for real ONNX Runtime integration.
+
+What it does now:
+
+- receives command-line arguments
+- prints a JSON payload to stdout
+- makes it clear that environment-specific ONNX logic should replace it
+
+How it connects to the suite:
+
+- `configs/profiles/gpu-dev.yaml` or another real profile points `onnx_runtime.benchmark_script` at this file
+- `src/llm_benchmark_suite/adapters/onnx_runtime.py` executes the script
+- the adapter reads stdout JSON and turns it into a normalized response
+
+What you would typically customize:
+
+- model/session initialization
+- execution provider selection
+- prompt submission
+- measurement of TTFT and total latency
+- structured stdout JSON fields consumed by the adapter
+
+### `scripts/mock_tensorrt_runner.py`
+
+Current role: demonstration helper for a command-driven TensorRT-LLM integration.
+
+What it does now:
+
+- prints static JSON with example latency and throughput fields
+- shows the shape expected by a command-based benchmark wrapper
+
+How it connects to the suite:
+
+- a profile can point `tensorrt_llm.command` to `python scripts/mock_tensorrt_runner.py`
+- `src/llm_benchmark_suite/adapters/tensorrt_llm.py` executes the command
+- the adapter parses stdout JSON into the common response schema
+
+Why it matters:
+
+- many TensorRT-LLM environments are driven by local benchmark binaries or wrappers instead of an HTTP API
+- this script documents that pattern in a minimal way
+
+### `Makefile`
+
+This is the thin convenience layer for local development.
+
+Targets:
+
+- `make install`: install the package and dev dependencies
+- `make lint`: run Ruff
+- `make test`: run pytest with coverage
+- `make demo`: run `cli run` using `PROFILE`, defaulting to `configs/profiles/local-demo.yaml`
+- `make smoke`: run `cli demo` and force the output directory to `artifacts/generated/demo`
+- `make report`: generate an HTML report from `artifacts/sample_run/summary.json`
+- `make baseline`: export a baseline from `artifacts/sample_run/summary.json`
+- `make regress`: run regression checks against that baseline
+
+Important distinction:
+
+- `make demo` runs `benchmark-suite run` semantics using the selected profile
+- `make smoke` runs the actual `demo` CLI command
+
+## Profiles, Datasets, And Thresholds
+
+### Profiles
+
+Profiles live in `configs/profiles/`.
+
+Included examples:
+
+- `local-demo.yaml`: full mock-mode demo across three datasets and three backends
+- `ci-smoke.yaml`: small mock-mode run intended for CI
+- `gpu-dev.yaml`: real-mode development profile with local endpoints and scripts
+- `perf-lab.yaml`: larger real-mode profile for performance testing
+
+A profile controls:
+
+- which backends run
+- which datasets are loaded
+- mock vs real mode
+- model defaults
+- output location
+- report formats
+- cost profile path
+- thresholds profile path
+- backend-specific overrides
+
+### Datasets
+
+Datasets live under `data/` and use JSON Lines format.
+
+Each row must include:
+
+- `id`
+- `prompt`
+- `task_type`
+
+Optional but strongly recommended:
+
+- `reference`
+- `expected_contains`
+- `tags`
+
+Example row:
+
+```json
+{"id":"qa-1","prompt":"What planet is known as the Red Planet?","reference":"Mars","task_type":"qa"}
+```
+
+### Cost Profile
+
+Cost assumptions live in `configs/costs/default.yaml`.
+
+This file controls the pricing values used by the cost model. Adjust it to match your infrastructure economics.
+
+### Thresholds Profile
+
+Regression gates live in `configs/thresholds/default.yaml`.
+
+These thresholds determine whether a new run is considered a regression compared with a baseline.
+
+## Step-By-Step Getting Started
 
 ### Step 1: Clone The Repository
 
@@ -195,7 +456,7 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 ```
 
-macOS / Linux:
+macOS or Linux:
 
 ```bash
 python -m venv .venv
@@ -208,37 +469,46 @@ source .venv/bin/activate
 make install
 ```
 
-Manual equivalent:
+Equivalent manual commands:
 
 ```bash
 python -m pip install --upgrade pip
 python -m pip install -e .[dev]
 ```
 
-## Step-By-Step Walkthrough For First-Time Users
-
-### Step 4: Run The Demo Benchmark
+### Step 4: Run The Test Suite First
 
 ```bash
-make demo
+make test
 ```
 
-Or explicitly:
+This verifies that the package, CLI, configs, and mock-path benchmark flow work on your machine.
+
+### Step 5: Run The Built-In Mock Benchmark
+
+Recommended command:
 
 ```bash
-python -m llm_benchmark_suite.cli run --config configs/profiles/local-demo.yaml
+python -m llm_benchmark_suite.cli demo --output-dir artifacts/generated/first-run
 ```
 
-What this does:
+Alternative convenience command:
 
-- loads built-in sample datasets
-- runs `vllm`, `tensorrt_llm`, and `onnx_runtime` in deterministic mock mode
-- computes quality metrics and cost estimates
-- writes reports to `artifacts/generated/local-demo/`
+```bash
+make smoke
+```
 
-### Step 5: Inspect Generated Reports
+What happens during this step:
 
-Expected outputs under `artifacts/generated/local-demo/`:
+1. `cli.py` loads `configs/profiles/local-demo.yaml`
+2. `demo` overrides the profile to force `mock_mode=true`
+3. `runner.py` iterates through the configured datasets and backends
+4. each adapter returns deterministic mock responses
+5. quality, cost, ranking, and report artifacts are produced
+
+### Step 6: Inspect The Output Artifacts
+
+Look in the chosen output directory. You should see:
 
 - `summary.json`
 - `summary.csv`
@@ -246,94 +516,273 @@ Expected outputs under `artifacts/generated/local-demo/`:
 - `summary.html`
 - `raw_responses.json`
 
-The HTML report is the best human-readable starting point.
+Suggested inspection order:
 
-### Step 6: Run Accuracy Evaluation
+1. open `summary.html` for the fastest overview
+2. inspect `summary.json` for the full machine-readable structure
+3. inspect `raw_responses.json` to see per-request normalized outputs
+
+### Step 7: Print Quality Metrics From The Summary
 
 ```bash
-python -m llm_benchmark_suite.cli evaluate --input artifacts/generated/local-demo/summary.json
+python -m llm_benchmark_suite.cli evaluate --input artifacts/generated/first-run/summary.json
 ```
 
-This prints quality metrics such as EM, F1, and ROUGE-L by backend and dataset.
+Use this when you want a quick textual view of quality numbers without opening a report.
 
-### Step 7: Export A Baseline
+### Step 8: Export A Baseline
 
 ```bash
-python -m llm_benchmark_suite.cli export-baseline --input artifacts/generated/local-demo/summary.json --output artifacts/generated/baseline.json
+python -m llm_benchmark_suite.cli export-baseline --input artifacts/generated/first-run/summary.json --output artifacts/generated/first-run/baseline.json
 ```
 
-Use this when you want a known-good benchmark result to compare future runs against.
+Use a baseline when you want future runs to be judged against a known-good result.
 
-### Step 8: Run Regression Checks Against The Baseline
+### Step 9: Run A Regression Check
 
 ```bash
-python -m llm_benchmark_suite.cli regress --current artifacts/generated/local-demo/summary.json --baseline artifacts/generated/baseline.json --thresholds configs/thresholds/default.yaml
+python -m llm_benchmark_suite.cli regress --current artifacts/generated/first-run/summary.json --baseline artifacts/generated/first-run/baseline.json --thresholds configs/thresholds/default.yaml
 ```
 
-This exits non-zero if one or more regression gates fail, which makes it CI-friendly.
+Expected behavior:
 
-Important:
+- if all checks pass, the command exits successfully
+- if any check fails, the command exits with code `1`
 
-- export the baseline first
-- then run `regress`
-- if you invoke them in parallel in CI, make the regression step depend on baseline creation
+This is the command you would normally wire into CI.
 
-### Step 9: Customize A Config Profile
-
-Open `configs/profiles/local-demo.yaml` and adjust:
-
-- selected backends
-- datasets
-- model name
-- precision
-- concurrency
-- batch size
-- output directory
-- report formats
-- cost profile
-- regression thresholds profile
-
-### Step 10: Add A New Backend Or Dataset
-
-Add a backend:
-
-1. Create a new adapter implementing the `BaseBackendAdapter` interface.
-2. Register it in `src/llm_benchmark_suite/adapters/factory.py`.
-3. Add profile config for connection details and runtime behavior.
-4. Add tests validating mock behavior and normalized metrics.
-
-Add a dataset:
-
-1. Create a `jsonl` file under `data/sample/` or `data/golden/`.
-2. Include `id`, `prompt`, `reference`, and `task_type`.
-3. Add the dataset entry to a run profile.
-
-## CLI Reference
-
-Available commands:
-
-- `benchmark-suite run`
-- `benchmark-suite demo`
-- `benchmark-suite evaluate`
-- `benchmark-suite compare`
-- `benchmark-suite regress`
-- `benchmark-suite report`
-- `benchmark-suite export-baseline`
-
-Example commands:
+### Step 10: Regenerate A Specific Report Format
 
 ```bash
-make install
-make test
-make demo
+python -m llm_benchmark_suite.cli report --input artifacts/generated/first-run/summary.json --format html --output-dir reports/generated/first-run
+```
+
+Use this when a summary already exists and you only want to regenerate presentation artifacts.
+
+### Step 11: Run A Profile-Driven Benchmark
+
+```bash
 python -m llm_benchmark_suite.cli run --config configs/profiles/local-demo.yaml
-python -m llm_benchmark_suite.cli compare --current artifacts/sample_run/summary.json --baseline artifacts/sample_run/summary.json --thresholds configs/thresholds/default.yaml
-python -m llm_benchmark_suite.cli report --input artifacts/sample_run/summary.json --format html --output-dir reports/generated
 ```
 
-## Verified Local Workflow
+This command respects whatever is inside the profile, including output directory and report formats.
 
-The following flow has been validated in this repository on Python `3.9.12`:
+This is what `make demo` calls under the hood.
+
+### Step 12: Move From Mock Mode To Real Mode
+
+1. Start from `configs/profiles/gpu-dev.yaml`
+2. update backend connection details
+3. replace scaffold scripts or commands with environment-specific implementations
+4. run `benchmark-suite run --config <your-profile>`
+5. export a baseline once the results are trustworthy
+6. enable `regress` in CI or scheduled jobs
+
+## CLI Commands
+
+### `benchmark-suite run`
+
+Run a benchmark using a YAML profile.
+
+Example:
+
+```bash
+benchmark-suite run --config configs/profiles/local-demo.yaml
+```
+
+Optional baseline comparison during the run:
+
+```bash
+benchmark-suite run --config configs/profiles/local-demo.yaml --baseline artifacts/generated/first-run/baseline.json
+```
+
+### `benchmark-suite demo`
+
+Run the built-in mock workflow and explicitly choose the output directory.
+
+Example:
+
+```bash
+benchmark-suite demo --output-dir artifacts/generated/demo
+```
+
+### `benchmark-suite evaluate`
+
+Print per-backend, per-dataset quality metrics from an existing summary.
+
+```bash
+benchmark-suite evaluate --input artifacts/generated/first-run/summary.json
+```
+
+### `benchmark-suite report`
+
+Generate one report format from an existing summary.
+
+```bash
+benchmark-suite report --input artifacts/generated/first-run/summary.json --format markdown --output-dir reports/generated/first-run
+```
+
+### `benchmark-suite compare`
+
+Print detailed regression comparison results between two summaries.
+
+```bash
+benchmark-suite compare --current artifacts/generated/run-a/summary.json --baseline artifacts/generated/run-b/summary.json --thresholds configs/thresholds/default.yaml
+```
+
+### `benchmark-suite regress`
+
+Run the same regression checks but fail the process if any check does not pass.
+
+```bash
+benchmark-suite regress --current artifacts/generated/run-a/summary.json --baseline artifacts/generated/run-b/summary.json --thresholds configs/thresholds/default.yaml
+```
+
+### `benchmark-suite export-baseline`
+
+Create a reusable baseline file from a summary.
+
+```bash
+benchmark-suite export-baseline --input artifacts/generated/first-run/summary.json --output artifacts/generated/baselines/local-demo.json
+```
+
+## Artifacts And Outputs
+
+### `summary.json`
+
+The primary machine-readable artifact.
+
+Contains:
+
+- run metadata
+- backend metrics
+- accuracy metrics
+- cost metrics
+- regression results
+- rankings
+- environment information
+- raw backend list and dataset list
+
+This is the artifact that later commands such as `evaluate`, `report`, `compare`, and `regress` consume.
+
+### `raw_responses.json`
+
+Contains one normalized response object per request.
+
+Useful for:
+
+- debugging adapter output
+- auditing generated answers
+- analyzing failed or low-quality cases
+
+### `summary.csv`
+
+A flat table for spreadsheet-style review.
+
+### `summary.md`
+
+A lightweight human-readable report for pull requests or artifact uploads.
+
+### `summary.html`
+
+A static browser-friendly report for quick inspection.
+
+## How Mock Mode Works
+
+Mock mode is implemented in the base adapter and backend adapters.
+
+Characteristics:
+
+- deterministic text generation based on backend name and request ID
+- synthetic latency and token metrics
+- no dependency on actual servers, GPUs, or benchmark binaries
+- useful for CI, CLI validation, and report development
+
+Mock mode is the recommended first run because it exercises the full pipeline without infrastructure dependencies.
+
+## How Real Mode Works
+
+In real mode, the suite still follows the same pipeline but adapters stop generating synthetic responses and instead call backend-specific integration points.
+
+Typical pattern:
+
+1. the profile selects `mock_mode: false`
+2. backend-specific overrides provide endpoints, commands, or script paths
+3. the adapter runs a health check if implemented
+4. the adapter executes one request at a time and normalizes the output
+5. the rest of the suite stays unchanged
+
+This means the quality, cost, ranking, and regression logic do not need to know whether the data came from HTTP, a local binary, or a Python script.
+
+## Backend-Specific Notes
+
+### vLLM
+
+Expected integration style:
+
+- OpenAI-compatible HTTP endpoint
+- optional health endpoint
+- JSON response with `choices` and optional `usage`
+
+Best fit when your serving stack already exposes an HTTP API.
+
+### TensorRT-LLM
+
+Expected integration style:
+
+- local benchmark command or wrapper script
+- JSON printed to stdout
+
+Best fit when your benchmarking environment is command-driven instead of service-driven.
+
+### ONNX Runtime / ORT GenAI
+
+Expected integration style:
+
+- local Python script or wrapper
+- JSON printed to stdout
+
+Best fit when you want to run inference through a custom environment-specific script, especially when session setup or provider selection is specific to your deployment.
+
+## Regression Comparison
+
+Regression thresholds live in `configs/thresholds/default.yaml`.
+
+Current checks include:
+
+- `p95_latency`
+- `ttft`
+- `throughput`
+- `cost_per_million_tokens`
+- `error_rate`
+- `accuracy_min`
+- `missing_pair`
+
+A regression comparison is performed per `(backend_name, dataset_name)` pair. That matters when one run contains more than one backend or more than one dataset, because each pair is evaluated independently.
+
+Typical workflow:
+
+1. generate a trusted summary
+2. export it as a baseline
+3. generate a new summary after a code, model, or infrastructure change
+4. compare current vs baseline
+5. fail CI if regression gates fail
+
+## Testing And Validation
+
+Run lint:
+
+```bash
+make lint
+```
+
+Run tests:
+
+```bash
+make test
+```
+
+Run the verified local workflow:
 
 ```bash
 python -m pip install -e .[dev]
@@ -345,337 +794,117 @@ python -m llm_benchmark_suite.cli export-baseline --input artifacts/generated/ve
 python -m llm_benchmark_suite.cli regress --current artifacts/generated/verified-demo/summary.json --baseline artifacts/generated/verified-demo/baseline.json --thresholds configs/thresholds/default.yaml
 ```
 
-## Mock Mode vs Real Mode
+## Docker Workflow
 
-### Mock Mode
-
-Use mock mode when:
-
-- you want a zero-dependency local demo
-- you need deterministic CI coverage
-- you are developing reports or regression logic
-- real infrastructure is unavailable
-
-Properties:
-
-- deterministic synthetic outputs
-- deterministic synthetic serving metrics
-- full end-to-end execution without GPUs
-
-### Real Mode
-
-Use real mode when:
-
-- you have serving infrastructure available
-- you need actual latency, throughput, and utilization measurements
-- you want to validate production-representative configs
-
-Properties:
-
-- backend-specific connection details come from YAML config
-- backend quirks are isolated inside adapters
-- exact environment integration is intentionally scaffolded, not hardcoded
-
-## Config Profiles
-
-Included profiles:
-
-- `configs/profiles/local-demo.yaml`
-- `configs/profiles/ci-smoke.yaml`
-- `configs/profiles/gpu-dev.yaml`
-- `configs/profiles/perf-lab.yaml`
-
-Environment variable overrides:
-
-- `LLM_BENCHMARK_OUTPUT_DIR`
-- `LLM_BENCHMARK_PROFILE`
-- `LLM_BENCHMARK_LOG_LEVEL`
-- `LLM_BENCHMARK_JSON_LOGS`
-
-## Dataset Format
-
-Each dataset row is JSON Lines.
-
-Example:
-
-```json
-{"id":"qa-1","prompt":"What planet is known as the Red Planet?","reference":"Mars","task_type":"qa"}
-```
-
-Optional fields:
-
-- `expected_contains`
-- `tags`
-
-## Metrics Captured
-
-Serving metrics:
-
-- request count
-- prompt tokens
-- completion tokens
-- total tokens
-- TTFT
-- TPOT
-- average latency
-- p50 / p95 / p99 latency
-- tokens per second
-- requests per second
-- success rate
-- error rate
-- GPU memory usage
-- host memory usage
-- optional GPU utilization
-- warmup time
-- model load time
-- concurrency
-- batch size
-- precision / quantization
-- backend version
-- hardware metadata
-
-Quality metrics:
-
-- exact match
-- token-level F1
-- BLEU
-- ROUGE-L
-- pass rate
-- golden pass rate
-
-Cost metrics:
-
-- cost per 1K prompts
-- cost per 1M tokens
-- cost per request
-- cost per successful response
-- cost-per-throughput tradeoff
-- cost-adjusted quality score
-
-## Composite Score
-
-The suite ranks backends using a weighted composite score:
-
-```text
-CompositeScore =
-  (w_quality * normalized_quality)
-+ (w_latency * normalized_latency_score)
-+ (w_throughput * normalized_throughput_score)
-+ (w_cost * normalized_cost_score)
-+ (w_reliability * normalized_reliability_score)
-```
-
-Weights are configured in the selected run profile. Higher scores are better.
-
-## Cost Modeling
-
-Cost assumptions live in `configs/costs/default.yaml`.
-
-The default model includes:
-
-- GPU hourly cost
-- CPU hourly cost
-- memory GB-hour cost
-- storage and network placeholders
-- amortization factor
-
-Adjust this file to match your internal or cloud pricing model.
-
-## Regression Checks
-
-Regression thresholds live in `configs/thresholds/default.yaml`.
-
-Current rules include:
-
-- fail if p95 latency regresses beyond threshold
-- fail if TTFT regresses beyond threshold
-- fail if throughput drops beyond threshold
-- fail if aggregate quality falls below minimum
-- fail if cost per 1M tokens grows beyond threshold
-- fail if error rate exceeds maximum
-
-This is intended to support:
-
-- PR gates
-- nightly benchmark comparisons
-- model rollout validation
-- quantization and scheduler experiments
-
-## Reporting
-
-Generated report formats:
-
-- JSON
-- CSV
-- Markdown
-- HTML
-
-Typical output locations:
-
-- `artifacts/generated/<profile>/`
-- `reports/generated/`
-
-## Example Outputs
-
-### Example Benchmark Summary
-
-| Backend | Dataset | p95 Latency (ms) | TTFT (ms) | Tokens/s | Success Rate | Quality | Cost / 1M Tokens ($) |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| vllm | summarization | 91.0 | 35.2 | 375.7 | 1.0 | 0.784 | 4.22 |
-
-### Example Regression Output
-
-```text
-p95_latency: PASS
-ttft: PASS
-throughput: PASS
-cost_per_million_tokens: PASS
-error_rate: PASS
-accuracy_min: PASS
-```
-
-### Example Ranking Output
-
-```text
-backend=vllm dataset=summarization composite_score=0.8123
-```
-
-## Testing
-
-Run:
-
-```bash
-make test
-```
-
-Coverage focus:
-
-- adapter contract
-- metrics logic
-- cost logic
-- regression logic
-- report generation
-- CLI behavior
-- config loading
-- mock end-to-end run
-
-## CI/CD
-
-GitHub Actions workflow is defined in `.github/workflows/ci.yml`.
-
-It currently:
-
-1. installs dependencies
-2. runs lint
-3. runs tests
-4. runs a smoke benchmark in mock mode
-5. uploads generated artifacts
-
-## Docker
-
-Build image:
+Build the image:
 
 ```bash
 docker build -t llm-benchmark-suite .
 ```
 
-Run demo benchmark:
+Run the container directly:
 
 ```bash
-docker run --rm -v $(pwd)/artifacts:/app/artifacts llm-benchmark-suite
+docker run --rm -v ${PWD}/artifacts:/app/artifacts llm-benchmark-suite
 ```
 
-Compose:
+Run via compose:
 
 ```bash
 docker compose -f docker/docker-compose.yml up --build
 ```
 
-## Real Backend Integration Notes
+Current compose behavior:
 
-### vLLM
-
-- designed for OpenAI-compatible HTTP endpoints
-- configurable via endpoint and health URL
-- falls back cleanly to mock mode
-
-### TensorRT-LLM
-
-- designed around command-driven benchmark tooling
-- parses command output into normalized metrics
-- can be adapted to internal wrappers
-
-### ONNX Runtime / ORT GenAI
-
-- designed around a local benchmark or inference script
-- supports provider configuration via YAML
-- placeholder script included under `scripts/run_onnx_benchmark.py`
+- builds the repo image
+- mounts `artifacts/` and `reports/`
+- runs `python -m llm_benchmark_suite.cli demo --output-dir artifacts/generated/compose-demo`
 
 ## Troubleshooting
 
-- If `README` examples fail immediately, install the package with `pip install -e .[dev]`.
-- If `demo` fails, verify that dependencies from `requirements.txt` or `pyproject.toml` are installed.
-- If real-mode `vLLM` health checks fail, verify the configured endpoint and health URL.
-- If `TensorRT-LLM` command execution fails, run the configured command manually first.
-- If `ONNX Runtime` real mode is incomplete for your environment, replace the scaffold script with an environment-specific implementation.
-- If regression checks fail, inspect both current and baseline `summary.json` artifacts.
+### The CLI command is not found
 
-## FAQ
+Install the package in editable mode:
 
-### Do I need GPUs to use this repository?
+```bash
+python -m pip install -e .[dev]
+```
 
-No. The recommended first run is mock mode, which works on a normal developer machine.
+Or invoke commands as:
 
-### Is this production-ready?
+```bash
+python -m llm_benchmark_suite.cli <command>
+```
 
-The architecture, configs, tests, reports, and CLI are structured for production-style use. Real backend integrations still need environment-specific connection details and may need adapter extensions for your serving stack.
+### `make demo` and `make smoke` behave differently
 
-### Can I add more backends?
+That is intentional.
 
-Yes. The adapter abstraction is intended for that.
+- `make demo` calls `run` and uses the profile's configured output directory
+- `make smoke` calls `demo` and requires an explicit output directory baked into the target
 
-### Can this be used in CI?
+### The output directory is not where I expected
 
-Yes. The mock mode and `regress` command are specifically intended to support CI and regression gating.
+Check:
 
-## Limitations
+- `output_dir` in the selected profile
+- whether you used `run` or `demo`
+- whether `LLM_BENCHMARK_OUTPUT_DIR` is set in your environment
 
-- mock-mode concurrency is simplified and not intended to replace high-fidelity load testing
-- real backend integrations are scaffolds because deployment APIs differ across environments
-- semantic similarity is not enabled in the default lightweight dependency set
-- HTML reporting is intentionally static and lightweight
+### Real-mode vLLM fails health checks
 
-## Future Enhancements
+Verify:
 
-- async concurrency runner for higher-fidelity HTTP load generation
-- SQLite or MLflow run history tracking
-- trend analysis dashboards
-- richer charting
-- backend/model matrix execution
-- semantic similarity plugin path
+- the configured endpoint is reachable
+- `health_endpoint` is correct if you use a separate health route
+- the server returns a non-5xx status code
 
-## Quick Commands
+### Real-mode TensorRT-LLM fails
+
+Verify:
+
+- the configured command exists on the machine
+- running the command manually prints valid JSON
+- the JSON contains the latency fields expected by the adapter
+
+### Real-mode ONNX Runtime fails
+
+Verify:
+
+- the configured script path is correct
+- the script can be run manually with Python
+- the script prints valid JSON to stdout
+
+### Regression checks fail unexpectedly
+
+Inspect:
+
+- the current and baseline `summary.json`
+- whether a backend/dataset pair is missing in one run
+- the thresholds in `configs/thresholds/default.yaml`
+
+## Current Limitations
+
+- concurrency is represented in config and metrics, but execution is still sequential
+- mock mode is useful for validation, not for production-grade load testing
+- real backend integrations are scaffolds and may require environment-specific extension
+- text quality metrics are intentionally lightweight and not task-specialized
+- HTML reporting is static and intentionally simple
+- path validation and config validation are still fairly minimal
+
+## Recommended First Session
+
+If you want the shortest path to a successful run:
 
 ```bash
 make install
-make lint
 make test
-make demo
-make report
-make baseline
-make regress
+python -m llm_benchmark_suite.cli demo --output-dir artifacts/generated/first-run
+python -m llm_benchmark_suite.cli evaluate --input artifacts/generated/first-run/summary.json
 ```
 
-## Recommended First Run
+Then inspect:
 
-If you just want to validate that the repository is set up correctly:
-
-```bash
-make install
-make test
-make demo
-```
-
-Then open the generated report in:
-
-- `artifacts/generated/local-demo/summary.html`
+- `artifacts/generated/first-run/summary.html`
+- `artifacts/generated/first-run/summary.json`
+- `artifacts/generated/first-run/raw_responses.json`
