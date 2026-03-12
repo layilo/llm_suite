@@ -113,6 +113,8 @@ class RegressionCheckResult(BaseModel):
     """Single regression rule evaluation result."""
 
     check_name: str
+    backend_name: Optional[str] = None
+    dataset_name: Optional[str] = None
     passed: bool
     threshold: float
     current_value: float
