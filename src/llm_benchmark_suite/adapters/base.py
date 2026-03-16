@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import abc
 import hashlib
+import json
 import random
 from datetime import datetime, timezone
 from statistics import mean
+from typing import Any
 
 from llm_benchmark_suite.schemas.models import BackendMetrics, BenchmarkRequest, BenchmarkResponse
 
@@ -82,6 +84,113 @@ class BaseBackendAdapter(abc.ABC):
 
     def collect_metrics(self) -> dict[str, object]:
         return {"backend_name": self.backend_name, "mode": self.mode}
+
+    def _response_from_payload(
+        self,
+        request: BenchmarkRequest,
+        payload: dict[str, Any],
+        *,
+        fallback_text: str = "",
+    ) -> BenchmarkResponse:
+        output_text = self._extract_output_text(payload, fallback_text=fallback_text)
+        prompt_tokens = self._coerce_int(
+            payload.get("prompt_tokens"),
+            default=self._coerce_int(self._get_usage_value(payload, "prompt_tokens"), default=0),
+        )
+        completion_tokens = self._coerce_int(
+            payload.get("completion_tokens"),
+            default=self._coerce_int(
+                self._get_usage_value(payload, "completion_tokens"),
+                default=max(1, len(output_text.split())) if output_text else 0,
+            ),
+        )
+        total_tokens = self._coerce_int(
+            payload.get("total_tokens"),
+            default=self._coerce_int(
+                self._get_usage_value(payload, "total_tokens"),
+                default=prompt_tokens + completion_tokens,
+            ),
+        )
+        latency_ms = self._extract_latency_ms(payload)
+        ttft_ms = self._extract_metric(payload, "ttft_ms")
+        tpot_ms = self._extract_metric(payload, "tpot_ms")
+        success = bool(payload.get("success", True))
+        error_message = payload.get("error_message")
+        return BenchmarkResponse(
+            request_id=request.request_id,
+            backend_name=self.backend_name,
+            model_name=str(payload.get("model_name", self.defaults["model_name"])),
+            output_text=output_text,
+            success=success,
+            error_message=str(error_message) if error_message is not None else None,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=max(total_tokens, prompt_tokens + completion_tokens),
+            ttft_ms=ttft_ms,
+            tpot_ms=tpot_ms,
+            latency_ms=latency_ms,
+        )
+
+    def _parse_json_output(self, stdout: str) -> dict[str, Any]:
+        payload = json.loads(stdout.strip() or "{}")
+        if not isinstance(payload, dict):
+            raise ValueError("adapter command output must be a JSON object")
+        return payload
+
+    def _extract_output_text(self, payload: dict[str, Any], *, fallback_text: str = "") -> str:
+        output_text = payload.get("output_text")
+        if isinstance(output_text, str):
+            return output_text
+        choices = payload.get("choices")
+        if isinstance(choices, list) and choices:
+            first_choice = choices[0]
+            if isinstance(first_choice, dict):
+                message = first_choice.get("message")
+                if isinstance(message, dict) and isinstance(message.get("content"), str):
+                    return str(message["content"])
+                if isinstance(first_choice.get("text"), str):
+                    return str(first_choice["text"])
+        return fallback_text
+
+    def _get_usage_value(self, payload: dict[str, Any], key: str) -> Any:
+        usage = payload.get("usage", {})
+        if isinstance(usage, dict):
+            return usage.get(key)
+        return None
+
+    def _extract_latency_ms(self, payload: dict[str, Any]) -> float:
+        latency_payload = payload.get("latency_ms")
+        if isinstance(latency_payload, dict):
+            for key in ("avg", "mean", "p50", "total"):
+                if key in latency_payload:
+                    return self._coerce_float(latency_payload[key], default=0.0)
+            return 0.0
+        return self._coerce_float(latency_payload, default=0.0)
+
+    def _extract_metric(self, payload: dict[str, Any], key: str) -> float:
+        value = payload.get(key)
+        if value is not None:
+            return self._coerce_float(value, default=0.0)
+        metrics = payload.get("metrics", {})
+        if isinstance(metrics, dict):
+            return self._coerce_float(metrics.get(key), default=0.0)
+        return 0.0
+
+    def _coerce_int(self, value: object, *, default: int = 0) -> int:
+        try:
+            if value is None:
+                return default
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _coerce_float(self, value: object, *, default: float = 0.0) -> float:
+        try:
+            if value is None:
+                return default
+            return float(value)
+        except (TypeError, ValueError):
+            return default
 
     def _mock_response(self, request: BenchmarkRequest, flavor: str) -> BenchmarkResponse:
         seed_key = f"{self.backend_name}:{request.request_id}:{flavor}"

@@ -66,7 +66,8 @@ def render_markdown(summary: BenchmarkSummary) -> str:
         row_text = (
             f"| {row['backend']} | {row['dataset']} | {row['latency_p95_ms']} | "
             f"{row['ttft_ms']} | {row['tokens_per_second']} | {row['success_rate']} | "
-            f"{_format_value(row['quality'])} | { _format_value(row['cost_per_million_tokens_usd'], 2)} |"
+            f"{_format_value(row['quality'])} | "
+            f"{_format_value(row['cost_per_million_tokens_usd'], 2)} |"
         )
         lines.append(row_text)
     errors = summary.metadata.get("errors", [])

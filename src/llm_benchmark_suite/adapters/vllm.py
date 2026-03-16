@@ -34,18 +34,8 @@ class VLLMAdapter(BaseBackendAdapter):
         response = httpx.post(endpoint, json=payload, timeout=30.0)
         response.raise_for_status()
         body = response.json()
-        text = body["choices"][0]["message"]["content"]
-        usage = body.get("usage", {})
-        return BenchmarkResponse(
-            request_id=request.request_id,
-            backend_name=self.backend_name,
-            model_name=str(self.defaults["model_name"]),
-            output_text=text,
-            success=True,
-            prompt_tokens=int(usage.get("prompt_tokens", 0)),
-            completion_tokens=int(usage.get("completion_tokens", 0)),
-            total_tokens=int(usage.get("total_tokens", 0)),
-            ttft_ms=float(body.get("ttft_ms", 0.0)),
-            tpot_ms=float(body.get("tpot_ms", 0.0)),
-            latency_ms=float(body.get("latency_ms", 0.0)),
+        return self._response_from_payload(
+            request,
+            body,
+            fallback_text=request.reference or request.prompt,
         )

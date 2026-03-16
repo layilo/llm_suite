@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 
 from llm_benchmark_suite.adapters.base import BaseBackendAdapter
@@ -19,24 +18,24 @@ class TensorRTLLMAdapter(BaseBackendAdapter):
 
         command = str(self.config["command"]).split()
         result = subprocess.run(command, check=True, capture_output=True, text=True)
-        payload = json.loads(result.stdout.strip() or "{}")
-        latency_payload = payload.get("latency_ms", {})
-        latency_ms = (
-            latency_payload["p50"]
-            if isinstance(latency_payload, dict)
-            else payload.get("latency_ms", 0.0)
+        payload = self._parse_json_output(result.stdout)
+        payload.setdefault("request_id", request.request_id)
+        payload.setdefault(
+            "output_text",
+            request.reference or request.prompt,
         )
-        output_text = request.reference or request.prompt
-        return BenchmarkResponse(
-            request_id=request.request_id,
-            backend_name=self.backend_name,
-            model_name=str(self.defaults["model_name"]),
-            output_text=output_text,
-            success=True,
-            prompt_tokens=max(1, len(request.prompt.split())),
-            completion_tokens=max(1, len(output_text.split())),
-            total_tokens=max(2, len(request.prompt.split()) + len(output_text.split())),
-            ttft_ms=float(payload.get("ttft_ms", 0.0)),
-            tpot_ms=3.2,
-            latency_ms=float(latency_ms),
+        payload.setdefault("prompt_tokens", max(1, len(request.prompt.split())))
+        payload.setdefault(
+            "completion_tokens",
+            max(1, len(str(payload["output_text"]).split())),
+        )
+        payload.setdefault(
+            "total_tokens",
+            int(payload["prompt_tokens"]) + int(payload["completion_tokens"]),
+        )
+        payload.setdefault("tpot_ms", 3.2)
+        return self._response_from_payload(
+            request,
+            payload,
+            fallback_text=request.reference or request.prompt,
         )

@@ -59,7 +59,10 @@ def test_regression_compare_covers_each_backend_dataset_pair() -> None:
     assert len(onnx_results) == 6
     assert any(item.check_name == "p95_latency" and not item.passed for item in onnx_results)
     assert any(item.check_name == "throughput" and not item.passed for item in onnx_results)
-    assert any(item.check_name == "cost_per_million_tokens" and not item.passed for item in onnx_results)
+    assert any(
+        item.check_name == "cost_per_million_tokens" and not item.passed
+        for item in onnx_results
+    )
 
 
 def test_regression_compare_flags_missing_pair() -> None:

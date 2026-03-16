@@ -21,7 +21,7 @@ def _delta_pct(current: float, baseline: float) -> float:
 
 
 def _pair_key(item: object) -> tuple[str, str]:
-    return (str(getattr(item, "backend_name")), str(getattr(item, "dataset_name")))
+    return (str(item.backend_name), str(item.dataset_name))
 
 
 def _build_lookup(items: list[object]) -> dict[tuple[str, str], object]:
@@ -66,7 +66,14 @@ def _paired_metrics(
     baseline_acc = _build_lookup(baseline.accuracy_metrics)
     current_cost = _build_lookup(current.cost_metrics)
     baseline_cost = _build_lookup(baseline.cost_metrics)
-    pairs = sorted(set(current_bm) | set(baseline_bm) | set(current_acc) | set(baseline_acc) | set(current_cost) | set(baseline_cost))
+    pairs = sorted(
+        set(current_bm)
+        | set(baseline_bm)
+        | set(current_acc)
+        | set(baseline_acc)
+        | set(current_cost)
+        | set(baseline_cost)
+    )
     return [
         (
             pair,
@@ -88,18 +95,27 @@ def compare_summaries(
 ) -> list[RegressionCheckResult]:
     thresholds = load_yaml_file(thresholds_path)
     checks: list[RegressionCheckResult] = []
-    for pair, current_bm, baseline_bm, current_acc, baseline_acc, current_cost, baseline_cost in _paired_metrics(
-        current, baseline
-    ):
+    for (
+        pair,
+        current_bm,
+        baseline_bm,
+        current_acc,
+        baseline_acc,
+        current_cost,
+        baseline_cost,
+    ) in _paired_metrics(current, baseline):
         backend_name, dataset_name = pair
         if current_bm is None or baseline_bm is None:
-            checks.append(_missing_pair_result(pair, "current" if current_bm is None else "baseline"))
+            missing_side = "current" if current_bm is None else "baseline"
+            checks.append(_missing_pair_result(pair, missing_side))
             continue
         if current_acc is None or baseline_acc is None:
-            checks.append(_missing_pair_result(pair, "current" if current_acc is None else "baseline"))
+            missing_side = "current" if current_acc is None else "baseline"
+            checks.append(_missing_pair_result(pair, missing_side))
             continue
         if current_cost is None or baseline_cost is None:
-            checks.append(_missing_pair_result(pair, "current" if current_cost is None else "baseline"))
+            missing_side = "current" if current_cost is None else "baseline"
+            checks.append(_missing_pair_result(pair, missing_side))
             continue
 
         scenarios = [

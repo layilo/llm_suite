@@ -175,6 +175,28 @@ Important methods:
 
 This is the reason the rest of the suite can stay backend-agnostic.
 
+The base adapter now also owns the real-mode normalization contract. Concrete adapters are expected to focus on transport only, then hand raw payloads to shared normalization helpers.
+
+Normalized fields expected by the suite are:
+
+- `output_text`
+- `prompt_tokens`
+- `completion_tokens`
+- `total_tokens`
+- `ttft_ms`
+- `tpot_ms`
+- `latency_ms`
+- `success`
+- `error_message`
+
+The shared helpers also support common nested payload shapes such as:
+
+- `usage.prompt_tokens`, `usage.completion_tokens`, `usage.total_tokens`
+- `choices[0].message.content`
+- `choices[0].text`
+- `metrics.ttft_ms` and `metrics.tpot_ms`
+- `latency_ms` as either a number or an object like `{ \"p50\": ..., \"p95\": ... }`
+
 ### `src/llm_benchmark_suite/adapters/factory.py`
 
 This is the backend registry.
@@ -192,7 +214,13 @@ In real mode it:
 
 - performs a health check against `health_endpoint` or `endpoint`
 - sends a chat-completions style request
-- extracts text and token usage from the JSON response
+- hands the JSON response to the shared normalization helpers in `BaseBackendAdapter`
+
+Accepted real-mode payload patterns include:
+
+- `choices[0].message.content` or `choices[0].text` for output text
+- `usage.*` for token counts
+- top-level `ttft_ms`, `tpot_ms`, and `latency_ms`
 
 ### `src/llm_benchmark_suite/adapters/tensorrt_llm.py`
 
@@ -203,6 +231,27 @@ The `TensorRT-LLM` adapter supports:
 
 In real mode it expects the configured command to print JSON to stdout. The adapter reads that JSON and normalizes latency fields into a `BenchmarkResponse`.
 
+The preferred stdout contract is now:
+
+```json
+{
+  "output_text": "answer text",
+  "prompt_tokens": 12,
+  "completion_tokens": 34,
+  "total_tokens": 46,
+  "ttft_ms": 18.2,
+  "tpot_ms": 2.7,
+  "latency_ms": {"p50": 91.0, "p95": 110.0},
+  "success": true
+}
+```
+
+Notes:
+
+- `latency_ms` may also be a single number
+- if token counts are omitted, the adapter falls back to simple text-based estimates
+- if `output_text` is omitted, the adapter falls back to the request reference or prompt
+
 ### `src/llm_benchmark_suite/adapters/onnx_runtime.py`
 
 The `ONNX Runtime` adapter supports:
@@ -211,6 +260,25 @@ The `ONNX Runtime` adapter supports:
 - `real` mode via a Python benchmark script
 
 In real mode it executes the configured script and expects the script to print JSON to stdout.
+
+The preferred stdout contract matches the shared normalization contract:
+
+```json
+{
+  "output_text": "answer text",
+  "prompt_tokens": 12,
+  "completion_tokens": 34,
+  "total_tokens": 46,
+  "latency_ms": 95.0,
+  "metrics": {
+    "ttft_ms": 20.1,
+    "tpot_ms": 3.4
+  },
+  "success": true
+}
+```
+
+This adapter also supports top-level `ttft_ms` and `tpot_ms` if your script does not nest them under `metrics`.
 
 ### `src/llm_benchmark_suite/evaluators/quality.py`
 
@@ -351,6 +419,18 @@ What you would typically customize:
 - measurement of TTFT and total latency
 - structured stdout JSON fields consumed by the adapter
 
+Recommended stdout fields for a custom ONNX script:
+
+- `output_text`
+- `prompt_tokens`
+- `completion_tokens`
+- `total_tokens`
+- `latency_ms`
+- `ttft_ms` or `metrics.ttft_ms`
+- `tpot_ms` or `metrics.tpot_ms`
+- `success`
+- `error_message`
+
 ### `scripts/mock_tensorrt_runner.py`
 
 Current role: demonstration helper for a command-driven TensorRT-LLM integration.
@@ -370,6 +450,18 @@ Why it matters:
 
 - many TensorRT-LLM environments are driven by local benchmark binaries or wrappers instead of an HTTP API
 - this script documents that pattern in a minimal way
+
+Recommended stdout fields for a custom TensorRT-LLM wrapper:
+
+- `output_text`
+- `prompt_tokens`
+- `completion_tokens`
+- `total_tokens`
+- `latency_ms`
+- `ttft_ms`
+- `tpot_ms`
+- `success`
+- `error_message`
 
 ### `Makefile`
 
@@ -741,10 +833,12 @@ Typical pattern:
 1. the profile selects `mock_mode: false`
 2. backend-specific overrides provide endpoints, commands, or script paths
 3. the adapter runs a health check if implemented
-4. the adapter executes one request at a time and normalizes the output
+4. the adapter executes one request at a time and normalizes the output through the shared base-adapter helpers
 5. the rest of the suite stays unchanged
 
 This means the quality, cost, ranking, and regression logic do not need to know whether the data came from HTTP, a local binary, or a Python script.
+
+Real adapter contract cleanup means the repo now expects all real integrations to converge on the same normalized response semantics even if their transport layer differs.
 
 ## Backend-Specific Notes
 
@@ -758,6 +852,16 @@ Expected integration style:
 
 Best fit when your serving stack already exposes an HTTP API.
 
+Recommended response fields:
+
+- `choices[0].message.content` or `choices[0].text`
+- `usage.prompt_tokens`
+- `usage.completion_tokens`
+- `usage.total_tokens`
+- `ttft_ms`
+- `tpot_ms`
+- `latency_ms`
+
 ### TensorRT-LLM
 
 Expected integration style:
@@ -767,6 +871,15 @@ Expected integration style:
 
 Best fit when your benchmarking environment is command-driven instead of service-driven.
 
+Recommended stdout contract:
+
+- JSON object printed to stdout
+- `output_text`
+- token counts if available
+- `latency_ms` as a number or percentile object
+- `ttft_ms` and `tpot_ms` if available
+- `success` and `error_message` for wrapper-level status
+
 ### ONNX Runtime / ORT GenAI
 
 Expected integration style:
@@ -775,6 +888,15 @@ Expected integration style:
 - JSON printed to stdout
 
 Best fit when you want to run inference through a custom environment-specific script, especially when session setup or provider selection is specific to your deployment.
+
+Recommended stdout contract:
+
+- JSON object printed to stdout
+- `output_text`
+- token counts if available
+- `latency_ms`
+- `ttft_ms` and `tpot_ms`, either top-level or under `metrics`
+- `success` and `error_message`
 
 ## Regression Comparison
 
@@ -903,7 +1025,7 @@ Verify:
 
 - the configured command exists on the machine
 - running the command manually prints valid JSON
-- the JSON contains the latency fields expected by the adapter
+- the JSON contains fields expected by the shared normalization contract such as `output_text` and `latency_ms`
 
 ### Real-mode ONNX Runtime fails
 
@@ -912,6 +1034,7 @@ Verify:
 - the configured script path is correct
 - the script can be run manually with Python
 - the script prints valid JSON to stdout
+- the JSON matches the shared normalization contract used by the adapters
 
 ### Regression checks fail unexpectedly
 
@@ -939,6 +1062,7 @@ This is expected behavior for partial-run-safe reporting. The suite now prefers 
 - concurrency is represented in config and metrics, but execution is still sequential
 - mock mode is useful for validation, not for production-grade load testing
 - real backend integrations are scaffolds and may require environment-specific extension
+- real adapter transport is cleaner now, but command and script invocation is still intentionally lightweight and may need richer environment-specific wrappers
 - text quality metrics are intentionally lightweight and not task-specialized
 - HTML reporting is static and intentionally simple
 - path validation and config validation are still fairly minimal
