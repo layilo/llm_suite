@@ -175,7 +175,9 @@ def _resolve_profile_paths(payload: dict[str, Any], base_dir: Path) -> dict[str,
     backend_overrides: dict[str, dict[str, Any]] = {}
     for backend_name, override in resolved.get("backend_overrides", {}).items():
         override_payload = dict(override)
-        if backend_name == "onnx_runtime" and isinstance(override_payload.get("benchmark_script"), str):
+        if backend_name == "onnx_runtime" and isinstance(
+            override_payload.get("benchmark_script"), str
+        ):
             override_payload["benchmark_script"] = _resolve_path(
                 base_dir, str(override_payload["benchmark_script"])
             )
