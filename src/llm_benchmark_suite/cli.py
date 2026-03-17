@@ -10,7 +10,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from llm_benchmark_suite.config import load_run_config
+from llm_benchmark_suite.config import ConfigValidationError, load_run_config
 from llm_benchmark_suite.logging_utils import configure_logging
 from llm_benchmark_suite.orchestration.runner import run_benchmark
 from llm_benchmark_suite.regressions.checks import compare_summaries
@@ -70,7 +70,10 @@ def main() -> None:
 @click.option("--baseline", type=click.Path(exists=True), default=None)
 def run(config_path: str, baseline: Optional[str]) -> None:
     """Run a benchmark using a YAML profile."""
-    config = load_run_config(config_path)
+    try:
+        config = load_run_config(config_path)
+    except ConfigValidationError as exc:
+        raise click.ClickException(str(exc)) from exc
     baseline_summary = _load_summary(baseline) if baseline else None
     summary = run_benchmark(config, baseline_summary=baseline_summary)
     _print_summary(summary)
@@ -86,7 +89,10 @@ def run(config_path: str, baseline: Optional[str]) -> None:
 @click.option("--output-dir", required=True, type=click.Path())
 def demo(config_path: str, output_dir: str) -> None:
     """Run the built-in mock demo benchmark."""
-    config = load_run_config(config_path)
+    try:
+        config = load_run_config(config_path)
+    except ConfigValidationError as exc:
+        raise click.ClickException(str(exc)) from exc
     config.output_dir = output_dir
     config.mock_mode = True
     summary = run_benchmark(config)
