@@ -25,6 +25,9 @@ def test_report_rows_tolerate_missing_quality_and_cost() -> None:
     assert rows[0]["status"] == "partial"
     assert rows[0]["quality"] is None
     assert rows[0]["cost_per_million_tokens_usd"] is None
+    assert "benchmark_wall_time_s" in rows[0]
+    assert "concurrency" in rows[0]
 
     output = render_markdown(summary)
     assert "n/a" in output
+    assert "Wall Time (s)" in output

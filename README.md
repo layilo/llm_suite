@@ -171,11 +171,18 @@ Important methods:
 - `stop_server()`: optional teardown hook
 - `health_check()`: backend availability check
 - `infer()`: one request in, one normalized response out
-- `benchmark()`: runs `infer()` across a dataset and aggregates serving metrics
+- `benchmark()`: runs `infer()` across a dataset with bounded concurrency and aggregates serving metrics
 
 This is the reason the rest of the suite can stay backend-agnostic.
 
 The base adapter now also owns the real-mode normalization contract. Concrete adapters are expected to focus on transport only, then hand raw payloads to shared normalization helpers.
+
+Benchmark execution semantics are now:
+
+- `backend_defaults.concurrency` is enforced during request execution
+- throughput and requests-per-second are measured from benchmark wall clock time
+- latency percentiles remain distributions of per-request latency, not schedule completion times
+- optional warmup requests run before the measured window and are excluded from quality, cost, and ranking aggregates
 
 Normalized fields expected by the suite are:
 
@@ -251,6 +258,7 @@ Notes:
 - `latency_ms` may also be a single number
 - if token counts are omitted, the adapter falls back to simple text-based estimates
 - if `output_text` is omitted, the adapter falls back to the request reference or prompt
+- harness throughput metrics are computed from wall-clock benchmark timing rather than command-reported latency
 
 ### `src/llm_benchmark_suite/adapters/onnx_runtime.py`
 
@@ -1059,7 +1067,7 @@ This is expected behavior for partial-run-safe reporting. The suite now prefers 
 
 ## Current Limitations
 
-- concurrency is represented in config and metrics, but execution is still sequential
+- concurrency is implemented within a backend and dataset run, but backend and dataset pairs are still orchestrated sequentially
 - mock mode is useful for validation, not for production-grade load testing
 - real backend integrations are scaffolds and may require environment-specific extension
 - real adapter transport is cleaner now, but command and script invocation is still intentionally lightweight and may need richer environment-specific wrappers

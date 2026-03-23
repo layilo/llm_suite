@@ -6,6 +6,8 @@ import abc
 import hashlib
 import json
 import random
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from statistics import mean
 from typing import Any
@@ -43,12 +45,26 @@ class BaseBackendAdapter(abc.ABC):
     def benchmark(
         self, dataset_name: str, requests: list[BenchmarkRequest]
     ) -> tuple[list[BenchmarkResponse], BackendMetrics]:
-        responses = [self.infer(request) for request in requests]
+        warmup_requests = int(self.defaults.get("warmup_requests", 0))
+        configured_concurrency = max(int(self.defaults.get("concurrency", 1)), 1)
+
+        if warmup_requests > 0 and requests:
+            warmup_slice = requests[: min(warmup_requests, len(requests))]
+            self._run_requests(warmup_slice, concurrency=configured_concurrency, measure_offsets=False)
+
+        measured_started_at = time.perf_counter()
+        responses = self._run_requests(
+            requests,
+            concurrency=configured_concurrency,
+            measure_offsets=True,
+            run_start=measured_started_at,
+        )
+        benchmark_wall_time_s = max(time.perf_counter() - measured_started_at, 1e-6)
         latencies = [item.latency_ms for item in responses]
         ttft = [item.ttft_ms for item in responses]
         tpot = [item.tpot_ms for item in responses]
         total_tokens = sum(item.total_tokens for item in responses)
-        total_latency_s = max(sum(latencies) / 1000.0, 1e-6)
+        effective_concurrency = min(configured_concurrency, max(len(requests), 1))
         return responses, BackendMetrics(
             backend_name=self.backend_name,
             model_name=str(self.defaults["model_name"]),
@@ -64,8 +80,9 @@ class BaseBackendAdapter(abc.ABC):
             latency_ms_p50=_percentile(latencies, 50),
             latency_ms_p95=_percentile(latencies, 95),
             latency_ms_p99=_percentile(latencies, 99),
-            tokens_per_second=total_tokens / total_latency_s,
-            requests_per_second=len(responses) / total_latency_s,
+            benchmark_wall_time_s=benchmark_wall_time_s,
+            tokens_per_second=total_tokens / benchmark_wall_time_s,
+            requests_per_second=len(responses) / benchmark_wall_time_s,
             success_rate=sum(1 for item in responses if item.success) / max(len(responses), 1),
             error_rate=sum(1 for item in responses if not item.success) / max(len(responses), 1),
             gpu_memory_gb=float(self.config.get("mock_gpu_memory_gb", 8.0)),
@@ -73,14 +90,57 @@ class BaseBackendAdapter(abc.ABC):
             gpu_utilization_pct=float(self.config.get("mock_gpu_utilization_pct", 72.0)),
             warmup_time_s=float(self.config.get("mock_warmup_time_s", 1.5)),
             model_load_time_s=float(self.config.get("mock_model_load_time_s", 4.2)),
-            concurrency=int(self.defaults.get("concurrency", 1)),
+            concurrency=configured_concurrency,
             batch_size=int(self.defaults.get("batch_size", 1)),
+            measured_request_count=len(responses),
+            warmup_request_count=min(warmup_requests, len(requests)),
             hardware_metadata={"device": self.config.get("device", "mock-gpu"), "mode": self.mode},
             precision=str(self.defaults.get("precision", "fp16")),
             backend_version=str(self.config.get("backend_version", "mock-0.1")),
             quantization=str(self.config.get("quantization", "none")),
-            diagnostics={"config": self.config},
+            diagnostics={
+                "config": self.config,
+                "configured_concurrency": configured_concurrency,
+                "effective_concurrency": effective_concurrency,
+                "execution_mode": "concurrent" if effective_concurrency > 1 else "sequential",
+            },
         )
+
+    def _run_requests(
+        self,
+        requests: list[BenchmarkRequest],
+        *,
+        concurrency: int,
+        measure_offsets: bool,
+        run_start: float | None = None,
+    ) -> list[BenchmarkResponse]:
+        if not requests:
+            return []
+
+        def invoke(request: BenchmarkRequest) -> BenchmarkResponse:
+            started_at = time.perf_counter()
+            try:
+                response = self.infer(request)
+            except Exception as exc:
+                response = self._failure_response(request, str(exc))
+            finished_at = time.perf_counter()
+            if measure_offsets and run_start is not None:
+                response.started_at_offset_ms = max((started_at - run_start) * 1000.0, 0.0)
+                response.finished_at_offset_ms = max((finished_at - run_start) * 1000.0, 0.0)
+            return response
+
+        if concurrency <= 1 or len(requests) <= 1:
+            return [invoke(request) for request in requests]
+
+        ordered: list[BenchmarkResponse | None] = [None] * len(requests)
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            futures = [
+                executor.submit(invoke, request)
+                for request in requests
+            ]
+            for index, future in enumerate(futures):
+                ordered[index] = future.result()
+        return [response for response in ordered if response is not None]
 
     def collect_metrics(self) -> dict[str, object]:
         return {"backend_name": self.backend_name, "mode": self.mode}
@@ -228,6 +288,22 @@ class BaseBackendAdapter(abc.ABC):
             ]
             return variants[rng.randint(0, len(variants) - 1)]
         return request.prompt[:80]
+
+    def _failure_response(self, request: BenchmarkRequest, error_message: str) -> BenchmarkResponse:
+        return BenchmarkResponse(
+            request_id=request.request_id,
+            backend_name=self.backend_name,
+            model_name=str(self.defaults["model_name"]),
+            output_text="",
+            success=False,
+            error_message=error_message,
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            ttft_ms=0.0,
+            tpot_ms=0.0,
+            latency_ms=0.0,
+        )
 
 
 def _percentile(values: list[float], percentile: int) -> float:

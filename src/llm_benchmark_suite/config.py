@@ -46,6 +46,7 @@ class BackendDefaults(BaseModel):
     concurrency: int = 1
     batch_size: int = 1
     max_output_tokens: int = 128
+    warmup_requests: int = 0
 
     @field_validator("model_name", "precision")
     @classmethod
@@ -60,6 +61,13 @@ class BackendDefaults(BaseModel):
     def _require_positive_int(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("must be greater than 0")
+        return value
+
+    @field_validator("warmup_requests")
+    @classmethod
+    def _require_non_negative_int(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("must be greater than or equal to 0")
         return value
 
 

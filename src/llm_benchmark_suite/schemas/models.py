@@ -34,6 +34,8 @@ class BenchmarkResponse(BaseModel):
     ttft_ms: float = 0.0
     tpot_ms: float = 0.0
     latency_ms: float = 0.0
+    started_at_offset_ms: float = 0.0
+    finished_at_offset_ms: float = 0.0
 
 
 class BackendMetrics(BaseModel):
@@ -53,6 +55,7 @@ class BackendMetrics(BaseModel):
     latency_ms_p50: float
     latency_ms_p95: float
     latency_ms_p99: float
+    benchmark_wall_time_s: float = 0.0
     tokens_per_second: float
     requests_per_second: float
     success_rate: float
@@ -64,6 +67,8 @@ class BackendMetrics(BaseModel):
     model_load_time_s: float = 0.0
     concurrency: int = 1
     batch_size: int = 1
+    measured_request_count: int = 0
+    warmup_request_count: int = 0
     hardware_metadata: dict[str, Any] = Field(default_factory=dict)
     precision: str = "unknown"
     backend_version: str = "unknown"

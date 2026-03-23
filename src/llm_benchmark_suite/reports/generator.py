@@ -38,6 +38,8 @@ def summary_to_rows(summary: BenchmarkSummary) -> list[dict[str, object]]:
                 "dataset": metrics.dataset_name,
                 "latency_p95_ms": round(metrics.latency_ms_p95, 2),
                 "ttft_ms": round(metrics.ttft_ms_avg, 2),
+                "benchmark_wall_time_s": round(metrics.benchmark_wall_time_s, 4),
+                "concurrency": metrics.concurrency,
                 "tokens_per_second": round(metrics.tokens_per_second, 2),
                 "success_rate": round(metrics.success_rate, 4),
                 "quality": round(quality.aggregate_quality, 4) if quality is not None else None,
@@ -57,15 +59,16 @@ def render_markdown(summary: BenchmarkSummary) -> str:
         f"# Benchmark Summary: {summary.run_id}",
         "",
         (
-            "| Backend | Dataset | p95 Latency (ms) | TTFT (ms) | Tokens/s | "
+            "| Backend | Dataset | p95 Latency (ms) | TTFT (ms) | Wall Time (s) | Concurrency | Tokens/s | "
             "Success Rate | Quality | Cost / 1M Tokens ($) |"
         ),
-        "|---|---:|---:|---:|---:|---:|---:|---:|",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
         row_text = (
             f"| {row['backend']} | {row['dataset']} | {row['latency_p95_ms']} | "
-            f"{row['ttft_ms']} | {row['tokens_per_second']} | {row['success_rate']} | "
+            f"{row['ttft_ms']} | {row['benchmark_wall_time_s']} | {row['concurrency']} | "
+            f"{row['tokens_per_second']} | {row['success_rate']} | "
             f"{_format_value(row['quality'])} | "
             f"{_format_value(row['cost_per_million_tokens_usd'], 2)} |"
         )
@@ -111,9 +114,11 @@ def render_html(summary: BenchmarkSummary) -> str:
         (
             f"<tr><td>{html.escape(str(row['backend']))}</td>"
             f"<td>{row['dataset']}</td>"
+            f"<td>{row['concurrency']}</td>"
             f"<td><div style='background:#14342b;height:18px;"
             f"width:{max(1, int(float(row['tokens_per_second'])))}px'></div></td>"
             f"<td>{row['tokens_per_second']}</td>"
+            f"<td>{row['benchmark_wall_time_s']}</td>"
             f"<td>{row['latency_p95_ms']}</td><td>{html.escape(_format_value(row['quality']))}</td></tr>"
         )
         for row in rows
@@ -182,8 +187,10 @@ def render_html(summary: BenchmarkSummary) -> str:
         <tr>
           <th>Backend</th>
           <th>Dataset</th>
+          <th>Concurrency</th>
           <th>Tokens/s Bar</th>
           <th>Tokens/s</th>
+          <th>Wall Time (s)</th>
           <th>p95 Latency (ms)</th>
           <th>Quality</th>
         </tr>

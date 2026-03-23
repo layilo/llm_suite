@@ -28,6 +28,7 @@
       "latency_ms_p50": 85.0,
       "latency_ms_p95": 91.0,
       "latency_ms_p99": 92.0,
+      "benchmark_wall_time_s": 0.173,
       "tokens_per_second": 375.7,
       "requests_per_second": 11.6,
       "success_rate": 1.0,
@@ -39,11 +40,17 @@
       "model_load_time_s": 4.1,
       "concurrency": 2,
       "batch_size": 1,
+      "measured_request_count": 2,
+      "warmup_request_count": 0,
       "hardware_metadata": {"device": "mock-gpu", "mode": "mock"},
       "precision": "fp16",
       "backend_version": "mock-0.1",
       "quantization": "none",
-      "diagnostics": {}
+      "diagnostics": {
+        "configured_concurrency": 2,
+        "effective_concurrency": 2,
+        "execution_mode": "concurrent"
+      }
     }
   ],
   "accuracy_metrics": [
@@ -96,6 +103,39 @@
       "reliability_score": 1.0
     }
   ],
-  "raw_responses": [],
+  "raw_responses": [
+    {
+      "request_id": "sample-1",
+      "backend_name": "vllm",
+      "model_name": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+      "output_text": "Sample answer 1",
+      "success": true,
+      "error_message": null,
+      "prompt_tokens": 20,
+      "completion_tokens": 12,
+      "total_tokens": 32,
+      "ttft_ms": 34.0,
+      "tpot_ms": 4.6,
+      "latency_ms": 85.0,
+      "started_at_offset_ms": 0.0,
+      "finished_at_offset_ms": 85.0
+    },
+    {
+      "request_id": "sample-2",
+      "backend_name": "vllm",
+      "model_name": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+      "output_text": "Sample answer 2",
+      "success": true,
+      "error_message": null,
+      "prompt_tokens": 21,
+      "completion_tokens": 12,
+      "total_tokens": 33,
+      "ttft_ms": 36.4,
+      "tpot_ms": 5.0,
+      "latency_ms": 88.0,
+      "started_at_offset_ms": 4.0,
+      "finished_at_offset_ms": 92.0
+    }
+  ],
   "metadata": {}
 }
